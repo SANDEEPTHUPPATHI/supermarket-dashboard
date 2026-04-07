@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2>Supermarket Dashboard</h2>
+            <div>
+                <a href="/home" style="margin-right: 15px;">Add / Inventory</a>
+                <a href="/export" style="margin-right: 15px;">Export CSV</a>
+                <a href="/logout">Logout</a>
+            </div>
+        </div>
+
+        <!-- FILTER BAR -->
+        <div class="filter-bar">
+            <form method="GET" action="/dashboard" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <label>
+                    <b>Timeframe:</b>
+                    <select name="timeframe">
+                        <option value="all" {% if current_timeframe == 'all' %}selected{% endif %}>All Time / Custom</option>
+                        <option value="1w" {% if current_timeframe == '1w' %}selected{% endif %}>Last 7 Days</option>
+                        <option value="1m" {% if current_timeframe == '1m' %}selected{% endif %}>Last 1 Month</option>
+                        <option value="3m" {% if current_timeframe == '3m' %}selected{% endif %}>Last 3 Months</option>
+                        <option value="6m" {% if current_timeframe == '6m' %}selected{% endif %}>Last 6 Months</option>
+                        <option value="1y" {% if current_timeframe == '1y' %}selected{% endif %}>Last 1 Year</option>
+                    </select>
+                </label>
+                <label>
+                    <b>Or Custom Range:</b>
+                    <input type="date" name="start_date" value="{{ current_start }}" style="padding: 5px; width: 130px;">
+                    <input type="date" name="end_date" value="{{ current_end }}" style="padding: 5px; width: 130px;">
+                </label>
+                <label>
+                    <b>Product:</b>
+                    <select name="product_id">
+                        <option value="all" {% if current_product == 'all' %}selected{% endif %}>All Products</option>
+                        {% for p in products %}
+                            <option value="{{ p.id }}" {% if current_product == p.id|string %}selected{% endif %}>{{ p.product_name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <b>Day of Week:</b>
+                    <select name="day">
+                        <option value="all" {% if current_day == 'all' %}selected{% endif %}>All Days</option>
+                        <option value="weekdays" {% if current_day == 'weekdays' %}selected{% endif %}>Weekdays (Mon-Fri)</option>
+                        <option value="weekends" {% if current_day == 'weekends' %}selected{% endif %}>Weekends (Sat & Sun)</option>
+                        <option value="1" {% if current_day == '1' %}selected{% endif %}>Monday</option>
+                        <option value="2" {% if current_day == '2' %}selected{% endif %}>Tuesday</option>
+                        <option value="3" {% if current_day == '3' %}selected{% endif %}>Wednesday</option>
+                        <option value="4" {% if current_day == '4' %}selected{% endif %}>Thursday</option>
+                        <option value="5" {% if current_day == '5' %}selected{% endif %}>Friday</option>
+                        <option value="6" {% if current_day == '6' %}selected{% endif %}>Saturday</option>
+                        <option value="0" {% if current_day == '0' %}selected{% endif %}>Sunday</option>
+                    </select>
+                </label>
+                <button type="submit" style="padding: 5px 15px;">Apply Filters</button>
+                <a href="/dashboard" style="text-decoration: none; color: blue; font-size: 14px;">Clear Filters</a>
+            </form>
+        </div>
+
+        <!-- KPI CARDS -->
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Total Sales Revenue</div>
+                <div class="kpi-value">₹{{ total_sales }}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Total Items Sold</div>
+                <div class="kpi-value">{{ total_items }}</div>
+            </div>
+        </div>
+
+    <!-- BODY GRID -->
+    <div class="grid-3">
+        <!-- LOW STOCK -->
+        <div class="card">
+            <h3>Low Stock Products</h3>
+            {% if low_stock %}
+                <ul style="padding-left: 20px;">
+                    {% for item in low_stock %}
+                        <li style="margin-bottom: 8px;"><b>{{ item.product_name }}</b> <span style="color: red; font-size: 0.9em;">({{ item.remaining_stock }} left)</span></li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p style="color: green;">✅ All stock is healthy!</p>
+            {% endif %}
+        </div>
+
+        <!-- CHARTS -->
+        <div class="card">
+            <h3>Sales by Category</h3>
+            <canvas id="categoryChart"></canvas>
+        </div>
+
+        <div class="card">
+            <h3>Daily Sales Trend</h3>
+            <canvas id="dailyChart"></canvas>
+        </div>
+    </div>
+
+    <!-- MASTER INVENTORY TABLE -->
+    <h3>Master Inventory List</h3>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Product Name</th>
+                    <th>Category</th>
+                    <th>Base Price</th>
+                    <th>Total Added Lifetime</th>
+                    <th>Stock Currently Available</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for p in products %}
+            <tr>
+                <td>{{ p.product_name }}</td>
+                <td>{{ p.category }}</td>
+                <td>₹{{ p.price }}</td>
+                <td>{{ p.total_quantity_added }}</td>
+                <td><b>{{ p.remaining_stock }}</b></td>
+                <td>{% if p.remaining_stock < p.threshold %}<span style="color: red; font-weight: 600;">🚨 Low Stock</span>{% else %}<span style="color: green; font-weight: 600;">✅ Healthy</span>{% endif %}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">No products added yet. Go to Data Entry to add some!</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- TRANSACTION TABLE -->
+    <h3>Transaction Log (Recent Sales)</h3>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Qty Sold</th>
+                    <th>Remaining Stock</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in sales %}
+            <tr>
+                <td>{{ row.date }}</td>
+                <td>{{ row.product_name }}</td>
+                <td>{{ row.category }}</td>
+                <td>₹{{ row.price }}</td>
+                <td>{{ row.quantity_sold }}</td>
+                <td>{{ row.remaining_stock }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    </div> <!-- Close container -->
+
+
+
+    <!-- CHART.JS -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+    // CATEGORY DATA
+    const categoryData = JSON.parse('{{ category_sales | tojson | safe }}');
+    const labels1 = Object.keys(categoryData);
+    const values1 = Object.values(categoryData);
+
+    new Chart(document.getElementById("categoryChart"), {
+        type: "bar",
+        data: {
+            labels: labels1,
+            datasets: [{
+                label: "Items Sold",
+                data: values1
+            }]
+        }
+    });
+
+    // DAILY DATA
+    const dailyData = JSON.parse('{{ daily_sales | tojson | safe }}');
+    const labels2 = Object.keys(dailyData);
+    const values2 = Object.values(dailyData);
+
+    new Chart(document.getElementById("dailyChart"), {
+        type: "line",
+        data: {
+            labels: labels2,
+            datasets: [{
+                label: "Sales (₹)",
+                data: values2
+            }]
+        }
+    });
+</script>
+
+</body>
+</html>

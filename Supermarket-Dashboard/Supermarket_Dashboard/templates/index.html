@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Data Entry</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h2>Inventory Management & Sales</h2>
+            <div>
+                <a href="/dashboard" style="margin-right: 15px;">Go to Dashboard</a>
+                <a href="/logout">Logout</a>
+            </div>
+        </div>
+
+        <div class="grid-3">
+            <!-- Add New Product -->
+            <div class="card">
+                <h3>1. Add Brand New Product</h3>
+                <form action="/add_product" method="POST">
+                    <input type="text" name="product_name" placeholder="Product Name" required>
+                    <input type="text" name="category" placeholder="Category" required>
+                    <input type="number" name="price" placeholder="Price (₹)" required>
+                    <input type="number" name="initial_stock" placeholder="Initial Stock" required>
+                    <input type="number" name="threshold" placeholder="Low Stock Alert (Default 20)">
+                    <button type="submit">Add Product to Inventory</button>
+                </form>
+            </div>
+
+            <!-- Log a Sale -->
+            <div class="card">
+                <h3>2. Log a Sale</h3>
+                <form action="/log_sale" method="POST">
+                    <input type="date" name="date" required>
+                    <select name="product_id" required>
+                        <option value="">-- Select Product --</option>
+                        {% for p in products %}
+                            <option value="{{ p.id }}">{{ p.product_name }} (Stock: {{ p.remaining_stock }})</option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" name="quantity_sold" placeholder="Quantity Sold" required>
+                    <button type="submit">Log Sale</button>
+                </form>
+            </div>
+
+            <!-- Restock Product -->
+            <div class="card">
+                <h3>3. Restock Product</h3>
+                <form action="/restock" method="POST">
+                    <select name="product_id" required>
+                        <option value="">-- Select Product --</option>
+                        {% for p in products %}
+                            <option value="{{ p.id }}">{{ p.product_name }} (Stock: {{ p.remaining_stock }})</option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" name="quantity_added" placeholder="Quantity to Add" required>
+                    <button type="submit">Restock</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card" style="max-width: 500px;">
+            <h3>Upload CSV Data</h3>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 12px;">Batch insert transactions easily.</p>
+            <form action="/import_csv" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file" accept=".csv" required>
+                <button type="submit">Import CSV</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
