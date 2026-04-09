@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Inventory | Supermarket OS{% endblock %}
+{% block page_name %}Inventory Management{% endblock %}
+
+{% block content %}
+<div x-data="{ addModal: false, restockModal: false, csvModal: false, searchQuery: '' }" 
+     x-init="
+        const params = new URLSearchParams(window.location.search);
+        if(params.get('msg') === 'product_added') $dispatch('notify', {type: 'success', message: 'Product added successfully!'});
+        if(params.get('msg') === 'restocked') $dispatch('notify', {type: 'success', message: 'Inventory restocked!'});
+        if(params.get('msg') === 'csv_imported') $dispatch('notify', {type: 'success', message: 'CSV data imported!'});
+     "
+     class="space-y-6">
+
+    <!-- Action Bar -->
+    <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div class="relative flex-1 max-w-md">
+            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-muted w-4 h-4"></i>
+            <input type="text" x-model="searchQuery" placeholder="Search products..." class="form-input pl-10" style="max-width: 300px;">
+        </div>
+        
+        <div class="flex items-center gap-3 flex-wrap">
+            <button @click="csvModal = true" class="btn btn-secondary">
+                <i data-lucide="upload" class="w-4 h-4"></i> Bulk Import
+            </button>
+            <button @click="restockModal = true" class="btn btn-secondary">
+                <i data-lucide="package-plus" class="w-4 h-4"></i> Restock
+            </button>
+            <button @click="addModal = true" class="btn btn-primary">
+                <i data-lucide="plus" class="w-4 h-4"></i> Add Product
+            </button>
+        </div>
+    </div>
+
+    <!-- Inventory Table -->
+    <div class="card p-0 overflow-hidden">
+        <div class="table-container border-0 rounded-none bg-transparent shadow-none">
+            <table class="data-table w-full">
+                <thead>
+                    <tr>
+                        <th>Product Details</th>
+                        <th>Category</th>
+                        <th>Base Price (₹)</th>
+                        <th>Available Stock</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for p in products %}
+                <tr x-show="searchQuery === '' || '{{ p.product_name | lower }}'.includes(searchQuery.toLowerCase()) || '{{ p.category | lower }}'.includes(searchQuery.toLowerCase())">
+                    <td>
+                        <div class="font-medium text-main">{{ p.product_name }}</div>
+                        <div class="text-xs text-muted">ID: #{{ p.id }} | Total Added: {{ p.total_quantity_added }}</div>
+                    </td>
+                    <td><span class="badge" style="background-color: var(--bg-hover); color: var(--text-main);">{{ p.category }}</span></td>
+                    <td class="font-medium text-main">₹{{ p.price }}</td>
+                    <td class="font-bold text-main">{{ p.remaining_stock }}</td>
+                    <td>
+                        {% if p.remaining_stock <= 0 %}
+                            <span class="badge badge-danger"><i data-lucide="x-circle" class="w-3 h-3 mr-1"></i> Out of Stock</span>
+                        {% elif p.remaining_stock < p.threshold %}
+                            <span class="badge badge-warning"><i data-lucide="alert-triangle" class="w-3 h-3 mr-1"></i> Low Stock</span>
+                        {% else %}
+                            <span class="badge badge-success"><i data-lucide="check-circle" class="w-3 h-3 mr-1"></i> Healthy</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center py-8 text-muted">No products found in inventory. Add your first product!</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modals -->
+
+    <!-- Add Product Modal -->
+    <div x-show="addModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" @click.outside="addModal = false">
+            <div class="modal-header">
+                <h3 class="modal-title">Add New Product</h3>
+                <button @click="addModal = false" class="icon-btn mb-0"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <form action="/add_product" method="POST">
+                <div class="form-group">
+                    <label class="form-label">Product Name</label>
+                    <input type="text" name="product_name" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <input type="text" name="category" class="form-input" required>
+                </div>
+                <div class="grid-cols-2">
+                    <div class="form-group">
+                        <label class="form-label">Price (₹)</label>
+                        <input type="number" name="price" class="form-input" required min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Initial Stock</label>
+                        <input type="number" name="initial_stock" class="form-input" required min="0">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Low Stock Alert Threshold</label>
+                    <input type="number" name="threshold" class="form-input" placeholder="Default 20" value="20" min="1">
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button type="button" @click="addModal = false" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Product</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Restock Modal -->
+    <div x-show="restockModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" @click.outside="restockModal = false">
+            <div class="modal-header">
+                <h3 class="modal-title">Restock Product</h3>
+                <button @click="restockModal = false" class="icon-btn mb-0"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <form action="/restock" method="POST">
+                <div class="form-group">
+                    <label class="form-label">Select Product</label>
+                    <select name="product_id" class="form-select" required>
+                        <option value="">-- Choose Product --</option>
+                        {% for p in products %}
+                            <option value="{{ p.id }}">{{ p.product_name }} (Stock: {{ p.remaining_stock }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Quantity to Add</label>
+                    <input type="number" name="quantity_added" class="form-input" required min="1">
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button type="button" @click="restockModal = false" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Stock</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- CSV Bulk Import Modal -->
+    <div x-show="csvModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" @click.outside="csvModal = false">
+            <div class="modal-header">
+                <h3 class="modal-title">Bulk Import (CSV)</h3>
+                <button @click="csvModal = false" class="icon-btn mb-0"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <form action="/import_csv" method="POST" enctype="multipart/form-data">
+                <p class="text-sm text-muted mb-4">Upload a CSV file to add products and log past snapshot data. <br>Format: Date, Product, Category, Price, Qty, Stock.</p>
+                <div class="form-group">
+                    <label class="form-label">Select CSV File</label>
+                    <input type="file" name="file" accept=".csv" class="form-input p-2 bg-hover" required>
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button type="button" @click="csvModal = false" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Upload & Import</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

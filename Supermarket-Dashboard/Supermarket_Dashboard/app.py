@@ -12,6 +12,38 @@ def parse_date(date_str):
             pass
     return date_str
 
+def predict_next_days(daily_sales, days=2):
+    if len(daily_sales) < 2:
+        return {}
+    
+    sorted_dates = sorted(daily_sales.keys())
+    y = [daily_sales[d] for d in sorted_dates]
+    n = len(y)
+    x = list(range(n))
+    
+    sum_x = sum(x)
+    sum_y = sum(y)
+    sum_xy = sum(xi*yi for xi, yi in zip(x, y))
+    sum_x2 = sum(xi**2 for xi in x)
+    
+    denominator = (n * sum_x2 - sum_x**2)
+    if denominator == 0:
+        return {}
+    
+    m = (n * sum_xy - sum_x * sum_y) / denominator
+    c = (sum_y - m * sum_x) / n
+    
+    predictions = {}
+    try:
+        last_date = datetime.strptime(sorted_dates[-1], "%Y-%m-%d")
+        for i in range(1, days + 1):
+            next_date = (last_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            pred_value = m * (n - 1 + i) + c
+            predictions[next_date] = max(0, round(pred_value, 2))
+    except ValueError:
+        pass
+    return predictions
+
 app = Flask(__name__)
 app.secret_key = "secret123"
 
@@ -101,7 +133,7 @@ def login():
 
         if user:
             session["user"] = username
-            return redirect("/home")
+            return redirect("/dashboard")
         else:
             return "Invalid Credentials"
 
@@ -141,16 +173,106 @@ def register():
 
     return render_template("register.html")
 
-# ---------- DATA ENTRY ----------
-@app.route("/home")
-def home():
+# ---------- DATA ENTRY & VIEWS ----------
+@app.route("/inventory")
+def inventory():
     if "user" not in session:
         return redirect("/")
 
     conn = get_db_connection()
     products = conn.execute("SELECT * FROM products").fetchall()
     conn.close()
-    return render_template("index.html", products=products)
+    return render_template("inventory.html", products=products)
+@app.route("/sales")
+def sales_view():
+    if "user" not in session:
+        return redirect("/")
+
+    conn = get_db_connection()
+    products = conn.execute("SELECT id, product_name, remaining_stock FROM products").fetchall()
+    sales = conn.execute("""
+        SELECT s.date, s.quantity_sold, s.stock_at_time_of_sale as remaining_stock, p.product_name, p.category, p.price
+        FROM sales s
+        JOIN products p ON s.product_id = p.id
+        ORDER BY s.id DESC LIMIT 50
+    """).fetchall()
+    conn.close()
+    return render_template("sales.html", products=products, sales=sales)
+
+@app.route("/reports")
+def reports_view():
+    if "user" not in session:
+        return redirect("/")
+    
+    conn = get_db_connection()
+    products = conn.execute("SELECT id, product_name FROM products").fetchall()
+
+    timeframe = request.args.get("timeframe", "all")
+    product_filter = request.args.get("product_id", "all")
+    day_filter = request.args.get("day", "all")
+    custom_start = request.args.get("start_date", "")
+    custom_end = request.args.get("end_date", "")
+
+    query = """
+        SELECT s.id, s.date, s.quantity_sold, s.stock_at_time_of_sale as remaining_stock, p.product_name, p.category, p.price, p.threshold
+        FROM sales s
+        JOIN products p ON s.product_id = p.id
+        WHERE 1=1
+    """
+    params = []
+
+    if custom_start and custom_end:
+        query += " AND s.date >= ? AND s.date <= ?"
+        params.extend([custom_start, custom_end])
+    elif timeframe != "all":
+        today = datetime.today()
+        if timeframe == "1w":
+            start_date = today - timedelta(days=7)
+        elif timeframe == "1m":
+            start_date = today - timedelta(days=30)
+        elif timeframe == "3m":
+            start_date = today - timedelta(days=90)
+        elif timeframe == "6m":
+            start_date = today - timedelta(days=180)
+        elif timeframe == "1y":
+            start_date = today - timedelta(days=365)
+        else:
+            start_date = today
+        
+        query += " AND s.date >= ?"
+        params.append(start_date.strftime('%Y-%m-%d'))
+
+    if product_filter != "all":
+        query += " AND s.product_id = ?"
+        params.append(product_filter)
+
+    if day_filter != "all":
+        if day_filter == "weekends":
+            query += " AND strftime('%w', s.date) IN ('0', '6')"
+        elif day_filter == "weekdays":
+            query += " AND strftime('%w', s.date) IN ('1', '2', '3', '4', '5')"
+        else:
+            query += " AND strftime('%w', s.date) = ?"
+            params.append(day_filter)
+
+    sales = conn.execute(query, params).fetchall()
+    conn.close()
+
+    total_sales = sum(row["price"] * row["quantity_sold"] for row in sales)
+    total_items = sum(row["quantity_sold"] for row in sales)
+
+    return render_template(
+        "reports.html", 
+        products=products,
+        sales=sales,
+        total_sales=total_sales,
+        total_items=total_items,
+        current_timeframe=timeframe,
+        current_product=product_filter,
+        current_day=day_filter,
+        current_start=custom_start,
+        current_end=custom_end
+    )
 
 @app.route("/add_product", methods=["POST"])
 def add_product():
@@ -172,7 +294,7 @@ def add_product():
         pass # Product exists
     finally:
         conn.close()
-    return redirect("/home")
+    return redirect("/inventory?msg=product_added")
 
 @app.route("/log_sale", methods=["POST"])
 def log_sale():
@@ -183,12 +305,18 @@ def log_sale():
     qty = int(request.form["quantity_sold"])
     
     conn = get_db_connection()
+    current_stock = conn.execute("SELECT remaining_stock FROM products WHERE id = ?", (product_id,)).fetchone()[0]
+    
+    if qty > current_stock:
+        conn.close()
+        return redirect("/sales?msg=invalid_stock")
+        
     conn.execute("UPDATE products SET remaining_stock = remaining_stock - ? WHERE id = ?", (qty, product_id))
-    new_stock = conn.execute("SELECT remaining_stock FROM products WHERE id = ?", (product_id,)).fetchone()[0]
+    new_stock = current_stock - qty
     conn.execute("INSERT INTO sales (date, product_id, quantity_sold, stock_at_time_of_sale) VALUES (?, ?, ?, ?)", (date, product_id, qty, new_stock))
     conn.commit()
     conn.close()
-    return redirect("/dashboard")
+    return redirect("/sales?msg=sale_logged")
 
 @app.route("/restock", methods=["POST"])
 def restock():
@@ -200,7 +328,7 @@ def restock():
     conn.execute("UPDATE products SET remaining_stock = remaining_stock + ?, total_quantity_added = total_quantity_added + ? WHERE id = ?", (qty_added, qty_added, product_id))
     conn.commit()
     conn.close()
-    return redirect("/dashboard")
+    return redirect("/inventory?msg=restocked")
 
 # ---------- CSV IMPORT / EXPORT ----------
 @app.route("/export")
@@ -283,7 +411,7 @@ def import_csv():
         conn.commit()
         conn.close()
     
-    return redirect("/dashboard")
+    return redirect("/inventory?msg=csv_imported")
 
 # ---------- DASHBOARD ----------
 @app.route("/dashboard")
@@ -303,6 +431,8 @@ def dashboard():
         products = conn.execute("SELECT * FROM products WHERE id = ?", (product_filter,)).fetchall()
     else:
         products = conn.execute("SELECT * FROM products").fetchall()
+
+    all_products = conn.execute("SELECT id, product_name FROM products").fetchall()
 
     query = """
         SELECT s.id, s.date, s.quantity_sold, s.stock_at_time_of_sale as remaining_stock, p.product_name, p.category, p.price, p.threshold
@@ -369,22 +499,124 @@ def dashboard():
 
     # Sort dictionary by date to ensure the chart displays chronologically
     daily_sales = dict(sorted(daily_sales.items()))
+    predicted_sales = predict_next_days(daily_sales, days=2)
 
+    # Also grab total products for KPI
+    total_products = len(products)
+    
     return render_template(
         "dashboard.html",
-        products=products,
-        sales=sales,
         total_sales=total_sales,
         total_items=total_items,
-        low_stock=low_stock,
+        total_products=total_products,
+        low_stock_count=len(low_stock),
+        low_stock=low_stock[:5],  # Just top 5 for activity feed
         category_sales=category_sales,
         daily_sales=daily_sales,
+        predicted_sales=predicted_sales,
         current_timeframe=timeframe,
+        all_products=all_products,
         current_product=product_filter,
         current_day=day_filter,
         current_start=custom_start,
         current_end=custom_end
     )
+
+@app.route("/api/dashboard_data")
+def api_dashboard_data():
+    if "user" not in session:
+        return {"error": "unauthorized"}, 401
+    
+    conn = get_db_connection()
+    timeframe = request.args.get("timeframe", "all")
+    product_filter = request.args.get("product_id", "all")
+    day_filter = request.args.get("day", "all")
+    custom_start = request.args.get("start_date", "")
+    custom_end = request.args.get("end_date", "")
+
+    if product_filter != "all":
+        products = conn.execute("SELECT * FROM products WHERE id = ?", (product_filter,)).fetchall()
+    else:
+        products = conn.execute("SELECT * FROM products").fetchall()
+
+    query = """
+        SELECT s.quantity_sold, p.price, p.category, s.date, p.product_name, s.id
+        FROM sales s JOIN products p ON s.product_id = p.id
+        WHERE 1=1
+    """
+    params = []
+
+    if custom_start and custom_end:
+        query += " AND s.date >= ? AND s.date <= ?"
+        params.extend([custom_start, custom_end])
+    elif timeframe != "all":
+        today = datetime.today()
+        if timeframe == "1w":
+            start_date = today - timedelta(days=7)
+        elif timeframe == "1m":
+            start_date = today - timedelta(days=30)
+        elif timeframe == "3m":
+            start_date = today - timedelta(days=90)
+        elif timeframe == "6m":
+            start_date = today - timedelta(days=180)
+        elif timeframe == "1y":
+            start_date = today - timedelta(days=365)
+        else:
+            start_date = today
+        
+        query += " AND s.date >= ?"
+        params.append(start_date.strftime('%Y-%m-%d'))
+
+    if product_filter != "all":
+        query += " AND s.product_id = ?"
+        params.append(product_filter)
+
+    if day_filter != "all":
+        if day_filter == "weekends":
+            query += " AND strftime('%w', s.date) IN ('0', '6')"
+        elif day_filter == "weekdays":
+            query += " AND strftime('%w', s.date) IN ('1', '2', '3', '4', '5')"
+        else:
+            query += " AND strftime('%w', s.date) = ?"
+            params.append(day_filter)
+
+    sales = conn.execute(query, params).fetchall()
+    
+    recent_query = query + " ORDER BY s.id DESC LIMIT 5"
+    recent_sales = conn.execute(recent_query, params).fetchall()
+    
+    conn.close()
+
+    total_sales = sum(row["price"] * row["quantity_sold"] for row in sales)
+    total_items = sum(row["quantity_sold"] for row in sales)
+    
+    category_sales = {}
+    for row in sales:
+        cat = row["category"]
+        category_sales[cat] = category_sales.get(cat, 0) + row["quantity_sold"]
+        
+    daily_sales = {}
+    for row in sales:
+        d = row["date"]
+        daily_sales[d] = daily_sales.get(d, 0) + (row["price"] * row["quantity_sold"])
+    
+    daily_sales = dict(sorted(daily_sales.items()))
+    predicted_sales = predict_next_days(daily_sales, days=2)
+
+    return {
+        "kpis": {
+            "total_sales": total_sales,
+            "total_items": total_items,
+            "total_products": len(products),
+            "low_stock": len([p for p in products if p["remaining_stock"] < p["threshold"]])
+        },
+        "charts": {
+            "category": category_sales,
+            "daily": daily_sales,
+            "predicted": predicted_sales
+        },
+        "recent_sales": [dict(r) for r in recent_sales]
+    }
 
 # ---------- LOGOUT ----------
 @app.route("/logout")

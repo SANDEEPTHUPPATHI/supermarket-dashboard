@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Reports | Supermarket OS{% endblock %}
+{% block page_name %}Analytics & Reports{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    <!-- Filters Strip -->
+    <div class="card bg-white dark:bg-gray-800">
+        <form method="GET" action="/reports" class="flex flex-wrap items-end gap-4">
+            
+            <div class="form-group mb-0 flex-1 min-w-[150px]">
+                <label class="form-label">Timeframe</label>
+                <select name="timeframe" class="form-select">
+                    <option value="all" {% if current_timeframe == 'all' %}selected{% endif %}>All Time / Custom</option>
+                    <option value="1w" {% if current_timeframe == '1w' %}selected{% endif %}>Last 7 Days</option>
+                    <option value="1m" {% if current_timeframe == '1m' %}selected{% endif %}>Last 1 Month</option>
+                    <option value="3m" {% if current_timeframe == '3m' %}selected{% endif %}>Last 3 Months</option>
+                    <option value="6m" {% if current_timeframe == '6m' %}selected{% endif %}>Last 6 Months</option>
+                    <option value="1y" {% if current_timeframe == '1y' %}selected{% endif %}>Last 1 Year</option>
+                </select>
+            </div>
+            
+            <div class="form-group mb-0 flex-1 min-w-[130px]">
+                <label class="form-label">Custom Start</label>
+                <input type="date" name="start_date" value="{{ current_start }}" class="form-input">
+            </div>
+            
+            <div class="form-group mb-0 flex-1 min-w-[130px]">
+                <label class="form-label">Custom End</label>
+                <input type="date" name="end_date" value="{{ current_end }}" class="form-input">
+            </div>
+
+            <div class="form-group mb-0 flex-1 min-w-[200px]">
+                <label class="form-label">Product</label>
+                <select name="product_id" class="form-select">
+                    <option value="all" {% if current_product == 'all' %}selected{% endif %}>All Products</option>
+                    {% for p in products %}
+                        <option value="{{ p.id }}" {% if current_product == p.id|string %}selected{% endif %}>{{ p.product_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group mb-0 flex-1 min-w-[150px]">
+                <label class="form-label">Day Segment</label>
+                <select name="day" class="form-select">
+                    <option value="all" {% if current_day == 'all' %}selected{% endif %}>All Days</option>
+                    <option value="weekdays" {% if current_day == 'weekdays' %}selected{% endif %}>Weekdays Only</option>
+                    <option value="weekends" {% if current_day == 'weekends' %}selected{% endif %}>Weekends Only</option>
+                    <option value="1" {% if current_day == '1' %}selected{% endif %}>Monday</option>
+                    <option value="2" {% if current_day == '2' %}selected{% endif %}>Tuesday</option>
+                    <option value="3" {% if current_day == '3' %}selected{% endif %}>Wednesday</option>
+                    <option value="4" {% if current_day == '4' %}selected{% endif %}>Thursday</option>
+                    <option value="5" {% if current_day == '5' %}selected{% endif %}>Friday</option>
+                    <option value="6" {% if current_day == '6' %}selected{% endif %}>Saturday</option>
+                    <option value="0" {% if current_day == '0' %}selected{% endif %}>Sunday</option>
+                </select>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button type="submit" class="btn btn-primary">Apply Filters</button>
+                <a href="/reports" class="btn btn-secondary">Clear</a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Export & KPI Row -->
+    <div class="flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-6">
+            <div>
+                <p class="text-sm text-muted">Filtered Revenue</p>
+                <p class="text-2xl font-bold text-success">₹{{ total_sales }}</p>
+            </div>
+            <div>
+                <p class="text-sm text-muted">Filtered Items Sold</p>
+                <p class="text-2xl font-bold">{{ total_items }}</p>
+            </div>
+        </div>
+        <a href="/export" class="btn btn-secondary">
+            <i data-lucide="download" class="w-4 h-4 text-primary"></i> Download CSV (All Data)
+        </a>
+    </div>
+
+    <!-- Data Grid -->
+    <div class="card p-0 overflow-hidden">
+        <div class="table-container border-0 rounded-none bg-transparent shadow-none">
+            <table class="data-table w-full">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Product ID</th>
+                        <th>Product Name</th>
+                        <th>Category</th>
+                        <th>Qty Sold</th>
+                        <th>Price/Unit</th>
+                        <th>Subtotal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in sales %}
+                <tr>
+                    <td class="text-sm">{{ row.date }}</td>
+                    <td class="text-muted text-xs">#{{ row.id }}</td>
+                    <td class="font-medium text-main">{{ row.product_name }}</td>
+                    <td>{{ row.category }}</td>
+                    <td class="font-bold">{{ row.quantity_sold }}</td>
+                    <td>₹{{ row.price }}</td>
+                    <td class="font-medium text-primary">₹{{ row.price * row.quantity_sold }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center py-8 text-muted">No records match your filters.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

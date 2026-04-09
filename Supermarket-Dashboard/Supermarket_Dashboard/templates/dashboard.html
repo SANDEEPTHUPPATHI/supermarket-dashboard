@@ -1,208 +1,342 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Dashboard</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <div class="container">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-            <h2>Supermarket Dashboard</h2>
-            <div>
-                <a href="/home" style="margin-right: 15px;">Add / Inventory</a>
-                <a href="/export" style="margin-right: 15px;">Export CSV</a>
-                <a href="/logout">Logout</a>
-            </div>
-        </div>
+{% extends "base.html" %}
+{% block title %}Dashboard | Supermarket OS{% endblock %}
+{% block page_name %}Dashboard{% endblock %}
 
-        <!-- FILTER BAR -->
-        <div class="filter-bar">
-            <form method="GET" action="/dashboard" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                <label>
-                    <b>Timeframe:</b>
-                    <select name="timeframe">
-                        <option value="all" {% if current_timeframe == 'all' %}selected{% endif %}>All Time / Custom</option>
-                        <option value="1w" {% if current_timeframe == '1w' %}selected{% endif %}>Last 7 Days</option>
-                        <option value="1m" {% if current_timeframe == '1m' %}selected{% endif %}>Last 1 Month</option>
-                        <option value="3m" {% if current_timeframe == '3m' %}selected{% endif %}>Last 3 Months</option>
-                        <option value="6m" {% if current_timeframe == '6m' %}selected{% endif %}>Last 6 Months</option>
-                        <option value="1y" {% if current_timeframe == '1y' %}selected{% endif %}>Last 1 Year</option>
-                    </select>
-                </label>
-                <label>
-                    <b>Or Custom Range:</b>
-                    <input type="date" name="start_date" value="{{ current_start }}" style="padding: 5px; width: 130px;">
-                    <input type="date" name="end_date" value="{{ current_end }}" style="padding: 5px; width: 130px;">
-                </label>
-                <label>
-                    <b>Product:</b>
-                    <select name="product_id">
-                        <option value="all" {% if current_product == 'all' %}selected{% endif %}>All Products</option>
-                        {% for p in products %}
-                            <option value="{{ p.id }}" {% if current_product == p.id|string %}selected{% endif %}>{{ p.product_name }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label>
-                    <b>Day of Week:</b>
-                    <select name="day">
-                        <option value="all" {% if current_day == 'all' %}selected{% endif %}>All Days</option>
-                        <option value="weekdays" {% if current_day == 'weekdays' %}selected{% endif %}>Weekdays (Mon-Fri)</option>
-                        <option value="weekends" {% if current_day == 'weekends' %}selected{% endif %}>Weekends (Sat & Sun)</option>
-                        <option value="1" {% if current_day == '1' %}selected{% endif %}>Monday</option>
-                        <option value="2" {% if current_day == '2' %}selected{% endif %}>Tuesday</option>
-                        <option value="3" {% if current_day == '3' %}selected{% endif %}>Wednesday</option>
-                        <option value="4" {% if current_day == '4' %}selected{% endif %}>Thursday</option>
-                        <option value="5" {% if current_day == '5' %}selected{% endif %}>Friday</option>
-                        <option value="6" {% if current_day == '6' %}selected{% endif %}>Saturday</option>
-                        <option value="0" {% if current_day == '0' %}selected{% endif %}>Sunday</option>
-                    </select>
-                </label>
-                <button type="submit" style="padding: 5px 15px;">Apply Filters</button>
-                <a href="/dashboard" style="text-decoration: none; color: blue; font-size: 14px;">Clear Filters</a>
-            </form>
-        </div>
-
-        <!-- KPI CARDS -->
-        <div class="kpi-grid">
-            <div class="kpi-card">
-                <div class="kpi-label">Total Sales Revenue</div>
-                <div class="kpi-value">₹{{ total_sales }}</div>
+{% block content %}
+<div 
+    x-data="dashboardData()" 
+    x-init="initData()"
+    class="space-y-6"
+>
+    <!-- Filters Strip -->
+    <div class="card mb-6 bg-white dark:bg-gray-800">
+        <form class="flex flex-wrap items-end gap-4" @submit.prevent>
+            
+            <div class="form-group mb-0 flex-1 min-w-[150px]">
+                <label class="form-label">Timeframe</label>
+                <select x-model="filters.timeframe" @change="fetchData()" class="form-select">
+                    <option value="all">All Time / Custom</option>
+                    <option value="1w">Last 7 Days</option>
+                    <option value="1m">Last 1 Month</option>
+                    <option value="3m">Last 3 Months</option>
+                    <option value="6m">Last 6 Months</option>
+                    <option value="1y">Last 1 Year</option>
+                </select>
             </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Total Items Sold</div>
-                <div class="kpi-value">{{ total_items }}</div>
+            
+            <div class="form-group mb-0 flex-1 min-w-[130px]">
+                <label class="form-label">Custom Start</label>
+                <input type="date" x-model="filters.start_date" @change="fetchData()" class="form-input">
             </div>
-        </div>
+            
+            <div class="form-group mb-0 flex-1 min-w-[130px]">
+                <label class="form-label">Custom End</label>
+                <input type="date" x-model="filters.end_date" @change="fetchData()" class="form-input">
+            </div>
 
-    <!-- BODY GRID -->
-    <div class="grid-3">
-        <!-- LOW STOCK -->
-        <div class="card">
-            <h3>Low Stock Products</h3>
-            {% if low_stock %}
-                <ul style="padding-left: 20px;">
-                    {% for item in low_stock %}
-                        <li style="margin-bottom: 8px;"><b>{{ item.product_name }}</b> <span style="color: red; font-size: 0.9em;">({{ item.remaining_stock }} left)</span></li>
+            <div class="form-group mb-0 flex-1 min-w-[200px]">
+                <label class="form-label">Product</label>
+                <select x-model="filters.product_id" @change="fetchData()" class="form-select">
+                    <option value="all">All Products</option>
+                    {% for p in all_products %}
+                        <option value="{{ p.id }}">{{ p.product_name }}</option>
                     {% endfor %}
-                </ul>
-            {% else %}
-                <p style="color: green;">✅ All stock is healthy!</p>
-            {% endif %}
+                </select>
+            </div>
+
+            <div class="form-group mb-0 flex-1 min-w-[150px]">
+                <label class="form-label">Day Segment</label>
+                <select x-model="filters.day" @change="fetchData()" class="form-select">
+                    <option value="all">All Days</option>
+                    <option value="weekdays">Weekdays Only</option>
+                    <option value="weekends">Weekends Only</option>
+                    <option value="1">Monday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="3">Wednesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="5">Friday</option>
+                    <option value="6">Saturday</option>
+                    <option value="0">Sunday</option>
+                </select>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button type="button" @click="resetFilters()" class="btn btn-secondary">Clear</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- KPIs -->
+    <div class="grid-cols-1 md:grid-cols-2 lg:grid-cols-4 mb-6" style="display: grid; gap: 24px;">
+        <div class="card kpi-card">
+            <div class="flex items-center justify-between">
+                <span class="kpi-title">Total Revenue</span>
+                <i data-lucide="indian-rupee" class="text-primary w-5 h-5"></i>
+            </div>
+            <div class="kpi-value" x-text="'₹' + kpis.total_sales.toLocaleString()">₹{{ total_sales }}</div>
         </div>
 
-        <!-- CHARTS -->
-        <div class="card">
-            <h3>Sales by Category</h3>
-            <canvas id="categoryChart"></canvas>
+        <div class="card kpi-card">
+            <div class="flex items-center justify-between">
+                <span class="kpi-title">Items Sold</span>
+                <i data-lucide="shopping-bag" class="text-success w-5 h-5"></i>
+            </div>
+            <div class="kpi-value" x-text="kpis.total_items.toLocaleString()">{{ total_items }}</div>
         </div>
 
-        <div class="card">
-            <h3>Daily Sales Trend</h3>
-            <canvas id="dailyChart"></canvas>
+        <div class="card kpi-card">
+            <div class="flex items-center justify-between">
+                <span class="kpi-title">Total Products</span>
+                <i data-lucide="package" class="text-info w-5 h-5"></i>
+            </div>
+            <div class="kpi-value" x-text="kpis.total_products.toLocaleString()">{{ total_products }}</div>
+        </div>
+
+        <div class="card kpi-card">
+            <div class="flex items-center justify-between">
+                <span class="kpi-title">Low Stock Alerts</span>
+                <i data-lucide="alert-triangle" class="text-danger w-5 h-5"></i>
+            </div>
+            <div class="kpi-value text-danger" x-text="kpis.low_stock">{{ low_stock_count }}</div>
         </div>
     </div>
 
-    <!-- MASTER INVENTORY TABLE -->
-    <h3>Master Inventory List</h3>
-    <div class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th>Product Name</th>
-                    <th>Category</th>
-                    <th>Base Price</th>
-                    <th>Total Added Lifetime</th>
-                    <th>Stock Currently Available</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for p in products %}
-            <tr>
-                <td>{{ p.product_name }}</td>
-                <td>{{ p.category }}</td>
-                <td>₹{{ p.price }}</td>
-                <td>{{ p.total_quantity_added }}</td>
-                <td><b>{{ p.remaining_stock }}</b></td>
-                <td>{% if p.remaining_stock < p.threshold %}<span style="color: red; font-weight: 600;">🚨 Low Stock</span>{% else %}<span style="color: green; font-weight: 600;">✅ Healthy</span>{% endif %}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="6">No products added yet. Go to Data Entry to add some!</td></tr>
-            {% endfor %}
-            </tbody>
-        </table>
+    <!-- Charts and Feed -->
+    <div class="grid-cols-1 lg:grid-cols-3" style="display: grid; gap: 24px; grid-template-columns: repeat(3, minmax(0, 1fr));">
+        
+        <!-- Left: Charts -->
+        <div class="lg:col-span-2 space-y-6" style="grid-column: span 2 / span 2; display: flex; flex-direction: column; gap: 24px;">
+            <div class="card">
+                <h3 class="card-title">Daily Sales Trend</h3>
+                <canvas id="dailyChart" height="100"></canvas>
+            </div>
+            
+            <div class="card">
+                <h3 class="card-title">Sales by Category</h3>
+                <canvas id="categoryChart" height="100"></canvas>
+            </div>
+        </div>
+
+        <!-- Right: Feeds -->
+        <div class="space-y-6" style="display: flex; flex-direction: column; gap: 24px;">
+            <div class="card">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="card-title mb-0">Live Sales Pulse</h3>
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        <span class="text-xs text-muted">Live</span>
+                    </div>
+                </div>
+                <div class="space-y-4">
+                    <template x-for="sale in recentSales" :key="sale.id">
+                        <div class="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800 last:border-0 last:pb-0">
+                            <div>
+                                <p class="font-medium text-sm" x-text="sale.product_name"></p>
+                                <p class="text-xs text-muted" x-text="sale.date"></p>
+                            </div>
+                            <span class="badge badge-success" x-text="'+' + sale.quantity_sold"></span>
+                        </div>
+                    </template>
+                    <div x-show="recentSales.length === 0" class="text-sm text-muted py-4 text-center">No recent sales.</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3 class="card-title text-danger flex items-center gap-2">
+                    <i data-lucide="alert-circle" class="w-4 h-4"></i> Needs Restock
+                </h3>
+                <div class="space-y-4 mt-4">
+                    {% for item in low_stock %}
+                        <div class="flex items-center justify-between">
+                            <span class="font-medium text-sm">{{ item.product_name }}</span>
+                            <span class="text-xs font-bold text-danger">{{ item.remaining_stock }} left</span>
+                        </div>
+                    {% else %}
+                        <p class="text-sm text-success text-center py-4">All stock is healthy!</p>
+                    {% endfor %}
+                </div>
+                <div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 text-center">
+                    <a href="/inventory" class="text-sm text-primary hover:underline font-medium">Manage Inventory &rarr;</a>
+                </div>
+            </div>
+        </div>
     </div>
+</div>
+{% endblock %}
 
-    <!-- TRANSACTION TABLE -->
-    <h3>Transaction Log (Recent Sales)</h3>
-    <div class="table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Product</th>
-                    <th>Category</th>
-                    <th>Price</th>
-                    <th>Qty Sold</th>
-                    <th>Remaining Stock</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for row in sales %}
-            <tr>
-                <td>{{ row.date }}</td>
-                <td>{{ row.product_name }}</td>
-                <td>{{ row.category }}</td>
-                <td>₹{{ row.price }}</td>
-                <td>{{ row.quantity_sold }}</td>
-                <td>{{ row.remaining_stock }}</td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
+{% block scripts %}
+<script>
+function dashboardData() {
+    return {
+        filters: {
+            timeframe: '{{ current_timeframe }}',
+            product_id: '{{ current_product }}',
+            day: '{{ current_day }}',
+            start_date: '{{ current_start }}',
+            end_date: '{{ current_end }}'
+        },
+        kpis: {
+            total_sales: {{ total_sales }},
+            total_items: {{ total_items }},
+            total_products: {{ total_products }},
+            low_stock: {{ low_stock_count }}
+        },
+        recentSales: [],
+        chartDaily: null,
+        chartCategory: null,
+        
+        initData() {
+            // Initial Chart Render
+            const dailyCtx = document.getElementById('dailyChart');
+            const catCtx = document.getElementById('categoryChart');
+            
+            const getTextColor = () => document.documentElement.classList.contains('dark') ? '#94a3b8' : '#6b7280';
+            const getGridColor = () => document.documentElement.classList.contains('dark') ? '#334155' : '#e5e7eb';
 
-    </div> <!-- Close container -->
+            Chart.defaults.color = getTextColor();
+            Chart.defaults.font.family = "'Inter', sans-serif";
 
+            const dailySalesObj = {{ daily_sales | tojson | safe }};
+            const predictedObj = {{ predicted_sales | tojson | safe }};
+            
+            const actualDates = Object.keys(dailySalesObj);
+            const predictedDates = Object.keys(predictedObj);
+            const allDates = [...new Set([...actualDates, ...predictedDates])].sort();
+            
+            const lastActualDate = actualDates[actualDates.length - 1];
+            
+            const actualValues = allDates.map(d => dailySalesObj[d] !== undefined ? dailySalesObj[d] : null);
+            const predictedValues = allDates.map(d => {
+                if (predictedObj[d] !== undefined) return predictedObj[d];
+                if (d === lastActualDate) return dailySalesObj[d];
+                return null;
+            });
 
+            this.chartDaily = new Chart(dailyCtx, {
+                type: 'line',
+                data: {
+                    labels: allDates,
+                    datasets: [
+                        {
+                            label: 'Sales Revenue (₹)',
+                            data: actualValues,
+                            borderColor: '#4f46e5',
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            fill: true,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'Predicted Sales (₹)',
+                            data: predictedValues,
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            tension: 0.4,
+                            fill: false,
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: { 
+                    responsive: true, 
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: getTextColor() }, grid: { color: getGridColor() } },
+                        y: { ticks: { color: getTextColor() }, grid: { color: getGridColor() } }
+                    }
+                }
+            });
 
-    <!-- CHART.JS -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            this.chartCategory = new Chart(catCtx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys({{ category_sales | tojson | safe }}),
+                    datasets: [{
+                        label: 'Items Sold',
+                        data: Object.values({{ category_sales | tojson | safe }}),
+                        backgroundColor: '#10b981',
+                        borderRadius: 4
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: getTextColor() }, grid: { color: getGridColor() } },
+                        y: { ticks: { color: getTextColor() }, grid: { color: getGridColor() } }
+                    }
+                }
+            });
 
-    <script>
-    // CATEGORY DATA
-    const categoryData = JSON.parse('{{ category_sales | tojson | safe }}');
-    const labels1 = Object.keys(categoryData);
-    const values1 = Object.values(categoryData);
+            // Listen for theme changes
+            window.addEventListener('theme-changed', () => {
+                const textColor = getTextColor();
+                const gridColor = getGridColor();
+                Chart.defaults.color = textColor;
+                
+                [this.chartDaily, this.chartCategory].forEach(chart => {
+                    if (chart.options.scales.x) {
+                        chart.options.scales.x.ticks.color = textColor;
+                        chart.options.scales.x.grid.color = gridColor;
+                    }
+                    if (chart.options.scales.y) {
+                        chart.options.scales.y.ticks.color = textColor;
+                        chart.options.scales.y.grid.color = gridColor;
+                    }
+                    chart.update();
+                });
+            });
 
-    new Chart(document.getElementById("categoryChart"), {
-        type: "bar",
-        data: {
-            labels: labels1,
-            datasets: [{
-                label: "Items Sold",
-                data: values1
-            }]
+            // Start live updates
+            this.fetchData();
+            setInterval(() => this.fetchData(), 7000); // 7s
+        },
+        
+        fetchData() {
+            const params = new URLSearchParams(this.filters);
+            fetch('/api/dashboard_data?' + params.toString())
+                .then(res => res.json())
+                .then(data => {
+                    // Update KPIs (Alpine reactivity)
+                    this.kpis = data.kpis;
+                    this.recentSales = data.recent_sales;
+                    
+                    const actualObj = data.charts.daily || {};
+                    const predObj = data.charts.predicted || {};
+                    
+                    const aDates = Object.keys(actualObj);
+                    const pDates = Object.keys(predObj);
+                    const mergedDates = [...new Set([...aDates, ...pDates])].sort();
+                    const lastD = aDates[aDates.length - 1];
+                    
+                    const aVals = mergedDates.map(d => actualObj[d] !== undefined ? actualObj[d] : null);
+                    const pVals = mergedDates.map(d => {
+                        if (predObj[d] !== undefined) return predObj[d];
+                        if (d === lastD) return actualObj[d];
+                        return null;
+                    });
+
+                    this.chartDaily.data.labels = mergedDates;
+                    this.chartDaily.data.datasets[0].data = aVals;
+                    if (this.chartDaily.data.datasets.length > 1) {
+                        this.chartDaily.data.datasets[1].data = pVals;
+                    }
+                    this.chartDaily.update();
+                    
+                    this.chartCategory.data.labels = Object.keys(data.charts.category);
+                    this.chartCategory.data.datasets[0].data = Object.values(data.charts.category);
+                    this.chartCategory.update();
+                });
+        },
+        
+        resetFilters() {
+            this.filters = { timeframe: 'all', product_id: 'all', day: 'all', start_date: '', end_date: '' };
+            this.fetchData();
         }
-    });
-
-    // DAILY DATA
-    const dailyData = JSON.parse('{{ daily_sales | tojson | safe }}');
-    const labels2 = Object.keys(dailyData);
-    const values2 = Object.values(dailyData);
-
-    new Chart(document.getElementById("dailyChart"), {
-        type: "line",
-        data: {
-            labels: labels2,
-            datasets: [{
-                label: "Sales (₹)",
-                data: values2
-            }]
-        }
-    });
+    }
+}
 </script>
-
-</body>
-</html>
+{% endblock %}

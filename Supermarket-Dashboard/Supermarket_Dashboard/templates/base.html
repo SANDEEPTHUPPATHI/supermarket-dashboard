@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" x-data="{ darkMode: localStorage.getItem('darkMode') === 'true', sidebarOpen: false }" x-init="$watch('darkMode', val => { localStorage.setItem('darkMode', val); $nextTick(() => window.dispatchEvent(new Event('theme-changed'))); })" :class="{ 'dark': darkMode }">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Supermarket OS{% endblock %}</title>
+    
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Google Fonts (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons (Lucide) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Main Styles -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="app-body">
+
+    <!-- Sidebar Overlay for mobile -->
+    <div x-show="sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false" x-transition.opacity style="display: none;"></div>
+
+    <!-- Sidebar -->
+    <aside class="app-sidebar" :class="sidebarOpen ? 'open' : ''">
+        <div class="sidebar-header">
+            <h1 class="brand-title">
+                <i data-lucide="store" class="brand-icon"></i> 
+                Supermarket OS
+            </h1>
+            <button @click="sidebarOpen = false" class="close-sidebar-btn">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="sidebar-nav-item {% if request.path == '/dashboard' %}active{% endif %}">
+                <i data-lucide="layout-dashboard"></i> Dashboard
+            </a>
+            <a href="/inventory" class="sidebar-nav-item {% if request.path == '/inventory' %}active{% endif %}">
+                <i data-lucide="package"></i> Inventory
+            </a>
+            <a href="/sales" class="sidebar-nav-item {% if request.path == '/sales' %}active{% endif %}">
+                <i data-lucide="shopping-cart"></i> Sales
+            </a>
+            <a href="/reports" class="sidebar-nav-item {% if request.path == '/reports' %}active{% endif %}">
+                <i data-lucide="bar-chart-2"></i> Reports
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="/logout" class="sidebar-nav-item text-danger">
+                <i data-lucide="log-out"></i> Logout
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <div class="app-wrapper">
+        
+        <!-- Top Navigation -->
+        <header class="app-header">
+            <div class="header-left">
+                <button @click="sidebarOpen = true" class="open-sidebar-btn">
+                    <i data-lucide="menu"></i>
+                </button>
+                <h2 class="page-title">{% block page_name %}Dashboard{% endblock %}</h2>
+            </div>
+
+            <div class="header-right">
+                <!-- Theme Toggle -->
+                <button @click="darkMode = !darkMode" class="icon-btn" title="Toggle Dark Mode">
+                    <i data-lucide="sun" x-show="darkMode"></i>
+                    <i data-lucide="moon" x-show="!darkMode"></i>
+                </button>
+                
+                <!-- Notifications -->
+                <div class="relative" x-data="{ notifOpen: false }" @click.away="notifOpen = false">
+                    <button @click="notifOpen = !notifOpen" class="icon-btn relative">
+                        <i data-lucide="bell"></i>
+                        <span class="notification-badge" style="pointer-events: none;"></span>
+                    </button>
+                    <!-- Notification Dropdown -->
+                    <div x-show="notifOpen" x-transition.opacity style="display: none; position: absolute; right: 0; top: 100%; margin-top: 8px; width: 280px; z-index: 50;" class="card p-0">
+                        <div style="padding: 12px 16px; border-bottom: 1px solid var(--border-color); font-weight: 600;">Notifications</div>
+                        <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 0.875rem;">
+                            No new notifications
+                        </div>
+                        <div style="padding: 8px; border-top: 1px solid var(--border-color); text-align: center;">
+                            <a href="#" class="text-primary hover:underline" style="font-size: 0.75rem; font-weight: 500;">Mark all as read</a>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Profile Placeholder -->
+                <div class="profile-avatar">
+                    {{ session.get('user', 'A')[:1].upper() }}
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Body -->
+        <main class="app-main">
+            <!-- Toast notification system snippet -->
+            <div x-data="{ toasts: [] }" 
+                 @notify.window="toasts.push($event.detail); setTimeout(() => toasts.shift(), 3000)" 
+                 class="toast-container">
+                <template x-for="(toast, index) in toasts" :key="index">
+                    <div class="toast-message" :class="toast.type">
+                         <i data-lucide="check-circle" x-show="toast.type === 'success'" class="toast-icon text-success"></i>
+                         <i data-lucide="alert-circle" x-show="toast.type === 'error'" class="toast-icon text-danger"></i>
+                         <i data-lucide="info" x-show="toast.type === 'info'" class="toast-icon text-info"></i>
+                        <span x-text="toast.message"></span>
+                    </div>
+                </template>
+            </div>
+
+            <div class="content-container">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+
+    <!-- Initialize Lucide Icons -->
+    <script>
+        lucide.createIcons();
+    </script>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

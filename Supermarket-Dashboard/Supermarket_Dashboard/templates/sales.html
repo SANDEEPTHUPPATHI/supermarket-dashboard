@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Sales | Supermarket OS{% endblock %}
+{% block page_name %}Sales & Transactions{% endblock %}
+
+{% block content %}
+<div x-data="{ logSaleModal: false }" 
+     x-init="
+        const params = new URLSearchParams(window.location.search);
+        if(params.get('msg') === 'sale_logged') $dispatch('notify', {type: 'success', message: 'Sale logged successfully!'});
+        if(params.get('msg') === 'invalid_stock') $dispatch('notify', {type: 'error', message: 'Invalid! Sale quantity exceeds available stock!'});
+     "
+     class="space-y-6">
+
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h2 class="text-lg font-semibold">Recent Transactions</h2>
+            <p class="text-sm text-muted">Showing last 50 sales entries.</p>
+        </div>
+        <button @click="logSaleModal = true" class="btn btn-primary">
+            <i data-lucide="plus" class="w-4 h-4"></i> Log Sale
+        </button>
+    </div>
+
+    <div class="card p-0 overflow-hidden">
+        <div class="table-container border-0 rounded-none bg-transparent shadow-none">
+            <table class="data-table w-full">
+                <thead>
+                    <tr>
+                        <th>Date & Time</th>
+                        <th>Product Info</th>
+                        <th>Sale Price</th>
+                        <th>Qty Sold</th>
+                        <th>Revenue</th>
+                        <th>Stock After</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for row in sales %}
+                <tr>
+                    <td class="text-sm">{{ row.date }}</td>
+                    <td>
+                        <div class="font-medium text-main">{{ row.product_name }}</div>
+                        <div class="text-xs text-muted">{{ row.category }}</div>
+                    </td>
+                    <td>₹{{ row.price }}</td>
+                    <td class="font-bold">{{ row.quantity_sold }}</td>
+                    <td class="font-medium text-success">₹{{ row.price * row.quantity_sold }}</td>
+                    <td class="text-muted text-sm">{{ row.remaining_stock }} left</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center py-8 text-muted">No sales transactions logged yet.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Log Sale Modal -->
+    <div x-show="logSaleModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" @click.outside="logSaleModal = false">
+            <div class="modal-header">
+                <h3 class="modal-title">Log a New Sale</h3>
+                <button @click="logSaleModal = false" class="icon-btn mb-0"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <form action="/log_sale" method="POST">
+                <div class="form-group">
+                    <label class="form-label">Date of Sale</label>
+                    <input type="date" name="date" class="form-input" required 
+                           x-data x-init="$el.value = new Date().toISOString().split('T')[0]">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Select Product</label>
+                    <select name="product_id" class="form-select" required>
+                        <option value="">-- Choose Product --</option>
+                        {% for p in products %}
+                            <option value="{{ p.id }}">{{ p.product_name }} (Stock: {{ p.remaining_stock }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Quantity Sold</label>
+                    <input type="number" name="quantity_sold" class="form-input" required min="1">
+                </div>
+                
+                <div class="flex justify-end gap-3 mt-6">
+                    <button type="button" @click="logSaleModal = false" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit Sale</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
