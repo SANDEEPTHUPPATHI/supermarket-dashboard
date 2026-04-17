@@ -2,7 +2,20 @@ from flask import Flask, render_template, request, redirect, session, Response
 import sqlite3
 import csv
 import io
+import os
 from datetime import datetime, timedelta
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
 
 def parse_date(date_str):
     for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d', '%d.%m.%Y'):
@@ -48,27 +61,63 @@ app = Flask(__name__)
 app.secret_key = "secret123"
 
 # ---------- DATABASE ----------
+class PostgresWrapper:
+    def __init__(self, conn):
+        self.conn = conn
+        
+    def execute(self, query, params=()):
+        cur = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # Convert SQLite placeholders to Postgres placeholders
+        query = query.replace("?", "%s")
+        # Replace string literal day of week extract
+        query = query.replace("strftime('%w', s.date)", "CAST(EXTRACT(DOW FROM CAST(s.date AS DATE)) AS TEXT)")
+        
+        cur.execute(query, params)
+        return cur
+        
+    def commit(self):
+        self.conn.commit()
+        
+    def close(self):
+        self.conn.close()
+
 def get_db_connection():
-    conn = sqlite3.connect("supermarket.db")
+    db_url = os.getenv("DATABASE_URL")
+    
+    if db_url and db_url.startswith("postgres"):
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        if psycopg2 is None:
+            raise RuntimeError("psycopg2 is not installed!")
+        conn = psycopg2.connect(db_url)
+        return PostgresWrapper(conn)
+
+    db_path = db_url if db_url else "supermarket.db"
+    if db_path.startswith("sqlite:///"):
+        db_path = db_path.replace("sqlite:///", "", 1)
+        
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
 
 def create_tables():
     conn = get_db_connection()
+    is_postgres = type(conn).__name__ == "PostgresWrapper"
 
     # Users table
-    conn.execute("""
+    pk_stmt = "SERIAL PRIMARY KEY" if is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk_stmt},
             username TEXT,
             password TEXT
         )
     """)
 
     # Supermarket data table (Legacy)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS supermarket (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk_stmt},
             date TEXT,
             product_name TEXT,
             category TEXT,
@@ -79,36 +128,51 @@ def create_tables():
     """)
 
     # Products table (Inventory)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS products_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER DEFAULT 1,
-            product_name TEXT,
-            category TEXT,
-            price INTEGER,
-            total_quantity_added INTEGER DEFAULT 0,
-            remaining_stock INTEGER DEFAULT 0,
-            threshold INTEGER DEFAULT 20,
-            UNIQUE(user_id, product_name)
-        )
-    """)
-    
-    old_products_exist = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'").fetchone()
-    if old_products_exist:
-        cols = [row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()]
-        if 'user_id' not in cols:
-            conn.execute("INSERT INTO products_new (id, product_name, category, price, total_quantity_added, remaining_stock, threshold) SELECT id, product_name, category, price, total_quantity_added, remaining_stock, threshold FROM products")
-            conn.execute("DROP TABLE products")
-            conn.execute("ALTER TABLE products_new RENAME TO products")
-        else:
-            conn.execute("DROP TABLE products_new")
+    if is_postgres:
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS products (
+                id {pk_stmt},
+                user_id INTEGER DEFAULT 1,
+                product_name TEXT,
+                category TEXT,
+                price INTEGER,
+                total_quantity_added INTEGER DEFAULT 0,
+                remaining_stock INTEGER DEFAULT 0,
+                threshold INTEGER DEFAULT 20,
+                UNIQUE(user_id, product_name)
+            )
+        """)
     else:
-        conn.execute("ALTER TABLE products_new RENAME TO products")
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS products_new (
+                id {pk_stmt},
+                user_id INTEGER DEFAULT 1,
+                product_name TEXT,
+                category TEXT,
+                price INTEGER,
+                total_quantity_added INTEGER DEFAULT 0,
+                remaining_stock INTEGER DEFAULT 0,
+                threshold INTEGER DEFAULT 20,
+                UNIQUE(user_id, product_name)
+            )
+        """)
+        
+        old_products_exist = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'").fetchone()
+        if old_products_exist:
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()]
+            if 'user_id' not in cols:
+                conn.execute("INSERT INTO products_new (id, product_name, category, price, total_quantity_added, remaining_stock, threshold) SELECT id, product_name, category, price, total_quantity_added, remaining_stock, threshold FROM products")
+                conn.execute("DROP TABLE products")
+                conn.execute("ALTER TABLE products_new RENAME TO products")
+            else:
+                conn.execute("DROP TABLE products_new")
+        else:
+            conn.execute("ALTER TABLE products_new RENAME TO products")
 
     # Sales table (Transactions)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS sales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk_stmt},
             user_id INTEGER DEFAULT 1,
             date TEXT,
             product_id INTEGER,
@@ -118,19 +182,23 @@ def create_tables():
         )
     """)
 
-    # Attempt to upgrade existing tables without rebuilding
-    try:
-        conn.execute("ALTER TABLE sales ADD COLUMN stock_at_time_of_sale INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-        
-    try:
-        conn.execute("ALTER TABLE sales ADD COLUMN user_id INTEGER DEFAULT 1")
-    except sqlite3.OperationalError:
-        pass
+    if not is_postgres:
+        # Attempt to upgrade existing SQLite tables without rebuilding
+        try:
+            conn.execute("ALTER TABLE sales ADD COLUMN stock_at_time_of_sale INTEGER DEFAULT 0")
+        except Exception:
+            pass
+            
+        try:
+            conn.execute("ALTER TABLE sales ADD COLUMN user_id INTEGER DEFAULT 1")
+        except Exception:
+            pass
 
     # Insert default user
-    conn.execute("INSERT OR IGNORE INTO users (id, username, password) VALUES (1, 'admin', 'admin')")
+    if is_postgres:
+        conn.execute("INSERT INTO users (id, username, password) VALUES (1, 'admin', 'admin') ON CONFLICT (id) DO NOTHING")
+    else:
+        conn.execute("INSERT OR IGNORE INTO users (id, username, password) VALUES (1, 'admin', 'admin')")
 
     conn.commit()
     conn.close()
