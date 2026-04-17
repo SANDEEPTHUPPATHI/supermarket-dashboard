@@ -43,6 +43,12 @@
         
         <h2 class="text-xl font-bold mb-6 text-main">Welcome Back</h2>
 
+        {% if error %}
+        <div style="background: rgba(239, 68, 68, 0.1); color: #ef4444; padding: 12px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-weight: 500; font-size: 0.9rem;">
+            {{ error }}
+        </div>
+        {% endif %}
+
         <form action="/" method="POST" class="text-left">
             <div class="form-group">
                 <label class="form-label">Username</label>

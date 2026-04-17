@@ -80,21 +80,36 @@ def create_tables():
 
     # Products table (Inventory)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS products (
+        CREATE TABLE IF NOT EXISTS products_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_name TEXT UNIQUE,
+            user_id INTEGER DEFAULT 1,
+            product_name TEXT,
             category TEXT,
             price INTEGER,
             total_quantity_added INTEGER DEFAULT 0,
             remaining_stock INTEGER DEFAULT 0,
-            threshold INTEGER DEFAULT 20
+            threshold INTEGER DEFAULT 20,
+            UNIQUE(user_id, product_name)
         )
     """)
+    
+    old_products_exist = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'").fetchone()
+    if old_products_exist:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(products)").fetchall()]
+        if 'user_id' not in cols:
+            conn.execute("INSERT INTO products_new (id, product_name, category, price, total_quantity_added, remaining_stock, threshold) SELECT id, product_name, category, price, total_quantity_added, remaining_stock, threshold FROM products")
+            conn.execute("DROP TABLE products")
+            conn.execute("ALTER TABLE products_new RENAME TO products")
+        else:
+            conn.execute("DROP TABLE products_new")
+    else:
+        conn.execute("ALTER TABLE products_new RENAME TO products")
 
     # Sales table (Transactions)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT 1,
             date TEXT,
             product_id INTEGER,
             quantity_sold INTEGER,
@@ -106,6 +121,11 @@ def create_tables():
     # Attempt to upgrade existing tables without rebuilding
     try:
         conn.execute("ALTER TABLE sales ADD COLUMN stock_at_time_of_sale INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+        
+    try:
+        conn.execute("ALTER TABLE sales ADD COLUMN user_id INTEGER DEFAULT 1")
     except sqlite3.OperationalError:
         pass
 
@@ -133,9 +153,10 @@ def login():
 
         if user:
             session["user"] = username
+            session["user_id"] = user["id"]
             return redirect("/dashboard")
         else:
-            return "Invalid Credentials"
+            return render_template("login.html", error="Invalid Credentials")
 
     return render_template("login.html")
 # ---------------REGISTER-----------------
@@ -179,8 +200,9 @@ def inventory():
     if "user" not in session:
         return redirect("/")
 
+    user_id = session.get("user_id")
     conn = get_db_connection()
-    products = conn.execute("SELECT * FROM products").fetchall()
+    products = conn.execute("SELECT * FROM products WHERE user_id = ?", (user_id,)).fetchall()
     conn.close()
     return render_template("inventory.html", products=products)
 @app.route("/sales")
@@ -188,14 +210,16 @@ def sales_view():
     if "user" not in session:
         return redirect("/")
 
+    user_id = session.get("user_id")
     conn = get_db_connection()
-    products = conn.execute("SELECT id, product_name, remaining_stock FROM products").fetchall()
+    products = conn.execute("SELECT id, product_name, remaining_stock FROM products WHERE user_id = ?", (user_id,)).fetchall()
     sales = conn.execute("""
         SELECT s.date, s.quantity_sold, s.stock_at_time_of_sale as remaining_stock, p.product_name, p.category, p.price
         FROM sales s
         JOIN products p ON s.product_id = p.id
+        WHERE p.user_id = ?
         ORDER BY s.id DESC LIMIT 50
-    """).fetchall()
+    """, (user_id,)).fetchall()
     conn.close()
     return render_template("sales.html", products=products, sales=sales)
 
@@ -204,8 +228,9 @@ def reports_view():
     if "user" not in session:
         return redirect("/")
     
+    user_id = session.get("user_id")
     conn = get_db_connection()
-    products = conn.execute("SELECT id, product_name FROM products").fetchall()
+    products = conn.execute("SELECT id, product_name FROM products WHERE user_id = ?", (user_id,)).fetchall()
 
     timeframe = request.args.get("timeframe", "all")
     product_filter = request.args.get("product_id", "all")
@@ -217,9 +242,9 @@ def reports_view():
         SELECT s.id, s.date, s.quantity_sold, s.stock_at_time_of_sale as remaining_stock, p.product_name, p.category, p.price, p.threshold
         FROM sales s
         JOIN products p ON s.product_id = p.id
-        WHERE 1=1
+        WHERE p.user_id = ?
     """
-    params = []
+    params = [user_id]
 
     if custom_start and custom_end:
         query += " AND s.date >= ? AND s.date <= ?"
@@ -277,43 +302,58 @@ def reports_view():
 @app.route("/add_product", methods=["POST"])
 def add_product():
     if "user" not in session: return redirect("/")
+    user_id = session.get("user_id")
     name = request.form["product_name"]
     category = request.form["category"]
     price = request.form["price"]
     initial_stock = request.form["initial_stock"]
     threshold = request.form.get("threshold", 20)
     
+    try:
+        if float(price) <= 0 or float(initial_stock) <= 0:
+            return redirect("/inventory?msg=invalid_product")
+    except ValueError:
+        return redirect("/inventory?msg=invalid_product")
+    
     conn = get_db_connection()
     try:
         conn.execute("""
-            INSERT INTO products (product_name, category, price, total_quantity_added, remaining_stock, threshold)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (name, category, price, initial_stock, initial_stock, threshold))
+            INSERT INTO products (user_id, product_name, category, price, total_quantity_added, remaining_stock, threshold)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, name, category, price, initial_stock, initial_stock, threshold))
         conn.commit()
     except sqlite3.IntegrityError:
-        pass # Product exists
-    finally:
         conn.close()
+        return redirect("/inventory?msg=product_exists")
+        
+    conn.close()
     return redirect("/inventory?msg=product_added")
 
 @app.route("/log_sale", methods=["POST"])
 def log_sale():
     if "user" not in session: return redirect("/")
+    user_id = session.get("user_id")
     date = request.form["date"]
     date = parse_date(date)
     product_id = request.form["product_id"]
     qty = int(request.form["quantity_sold"])
     
     conn = get_db_connection()
-    current_stock = conn.execute("SELECT remaining_stock FROM products WHERE id = ?", (product_id,)).fetchone()[0]
+    current_stock_row = conn.execute("SELECT remaining_stock FROM products WHERE id = ? AND user_id = ?", (product_id, user_id)).fetchone()
+    
+    if not current_stock_row:
+        conn.close()
+        return redirect("/sales?msg=invalid_product")
+        
+    current_stock = current_stock_row[0]
     
     if qty > current_stock:
         conn.close()
         return redirect("/sales?msg=invalid_stock")
         
-    conn.execute("UPDATE products SET remaining_stock = remaining_stock - ? WHERE id = ?", (qty, product_id))
+    conn.execute("UPDATE products SET remaining_stock = remaining_stock - ? WHERE id = ? AND user_id = ?", (qty, product_id, user_id))
     new_stock = current_stock - qty
-    conn.execute("INSERT INTO sales (date, product_id, quantity_sold, stock_at_time_of_sale) VALUES (?, ?, ?, ?)", (date, product_id, qty, new_stock))
+    conn.execute("INSERT INTO sales (user_id, date, product_id, quantity_sold, stock_at_time_of_sale) VALUES (?, ?, ?, ?, ?)", (user_id, date, product_id, qty, new_stock))
     conn.commit()
     conn.close()
     return redirect("/sales?msg=sale_logged")
@@ -321,11 +361,12 @@ def log_sale():
 @app.route("/restock", methods=["POST"])
 def restock():
     if "user" not in session: return redirect("/")
+    user_id = session.get("user_id")
     product_id = request.form["product_id"]
     qty_added = int(request.form["quantity_added"])
     
     conn = get_db_connection()
-    conn.execute("UPDATE products SET remaining_stock = remaining_stock + ?, total_quantity_added = total_quantity_added + ? WHERE id = ?", (qty_added, qty_added, product_id))
+    conn.execute("UPDATE products SET remaining_stock = remaining_stock + ?, total_quantity_added = total_quantity_added + ? WHERE id = ? AND user_id = ?", (qty_added, qty_added, product_id, user_id))
     conn.commit()
     conn.close()
     return redirect("/inventory?msg=restocked")
@@ -335,14 +376,16 @@ def restock():
 def export_csv():
     if "user" not in session:
         return redirect("/")
+    user_id = session.get("user_id")
 
     conn = get_db_connection()
     data = conn.execute("""
         SELECT s.date, p.product_name, p.category, p.price, s.quantity_sold, s.stock_at_time_of_sale as stock_left
         FROM sales s
         JOIN products p ON s.product_id = p.id
+        WHERE p.user_id = ?
         ORDER BY s.date ASC
-    """).fetchall()
+    """, (user_id,)).fetchall()
     conn.close()
 
     output = io.StringIO()
@@ -362,6 +405,7 @@ def export_csv():
 def import_csv():
     if "user" not in session:
         return redirect("/")
+    user_id = session.get("user_id")
 
     if 'file' not in request.files:
         return redirect("/home")
@@ -387,22 +431,22 @@ def import_csv():
                     stock = int(stock)
                     
                     # Resolve product
-                    p = conn.execute("SELECT id FROM products WHERE product_name = ?", (product,)).fetchone()
+                    p = conn.execute("SELECT id FROM products WHERE product_name = ? AND user_id = ?", (product, user_id)).fetchone()
                     if not p:
                         conn.execute("""
-                            INSERT INTO products (product_name, category, price, total_quantity_added, remaining_stock, threshold)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        """, (product, category, price, stock + qty, stock, 20))
+                            INSERT INTO products (user_id, product_name, category, price, total_quantity_added, remaining_stock, threshold)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (user_id, product, category, price, stock + qty, stock, 20))
                         conn.commit()
-                        p = conn.execute("SELECT id FROM products WHERE product_name = ?", (product,)).fetchone()
+                        p = conn.execute("SELECT id FROM products WHERE product_name = ? AND user_id = ?", (product, user_id)).fetchone()
                     
                     product_id = p['id']
                     
                     # Force update the live stock tracking
-                    conn.execute("UPDATE products SET remaining_stock = ? WHERE id = ?", (stock, product_id))
+                    conn.execute("UPDATE products SET remaining_stock = ? WHERE id = ? AND user_id = ?", (stock, product_id, user_id))
                     
                     # Insert sale into snapshot history
-                    conn.execute("INSERT INTO sales (date, product_id, quantity_sold, stock_at_time_of_sale) VALUES (?, ?, ?, ?)", (date, product_id, qty, stock))
+                    conn.execute("INSERT INTO sales (user_id, date, product_id, quantity_sold, stock_at_time_of_sale) VALUES (?, ?, ?, ?, ?)", (user_id, date, product_id, qty, stock))
                     
                 except Exception as e:
                     print(f"Skipping row {row} due to error: {e}")
@@ -418,6 +462,7 @@ def import_csv():
 def dashboard():
     if "user" not in session:
         return redirect("/")
+    user_id = session.get("user_id")
 
     conn = get_db_connection()
     timeframe = request.args.get("timeframe", "all")
@@ -428,19 +473,19 @@ def dashboard():
 
     # Fetch products (Inventory) - filtered if a specific product is selected
     if product_filter != "all":
-        products = conn.execute("SELECT * FROM products WHERE id = ?", (product_filter,)).fetchall()
+        products = conn.execute("SELECT * FROM products WHERE id = ? AND user_id = ?", (product_filter, user_id)).fetchall()
     else:
-        products = conn.execute("SELECT * FROM products").fetchall()
+        products = conn.execute("SELECT * FROM products WHERE user_id = ?", (user_id,)).fetchall()
 
-    all_products = conn.execute("SELECT id, product_name FROM products").fetchall()
+    all_products = conn.execute("SELECT id, product_name FROM products WHERE user_id = ?", (user_id,)).fetchall()
 
     query = """
         SELECT s.id, s.date, s.quantity_sold, s.stock_at_time_of_sale as remaining_stock, p.product_name, p.category, p.price, p.threshold
         FROM sales s
         JOIN products p ON s.product_id = p.id
-        WHERE 1=1
+        WHERE p.user_id = ?
     """
-    params = []
+    params = [user_id]
 
     if custom_start and custom_end:
         query += " AND s.date >= ? AND s.date <= ?"
@@ -526,6 +571,7 @@ def dashboard():
 def api_dashboard_data():
     if "user" not in session:
         return {"error": "unauthorized"}, 401
+    user_id = session.get("user_id")
     
     conn = get_db_connection()
     timeframe = request.args.get("timeframe", "all")
@@ -535,16 +581,16 @@ def api_dashboard_data():
     custom_end = request.args.get("end_date", "")
 
     if product_filter != "all":
-        products = conn.execute("SELECT * FROM products WHERE id = ?", (product_filter,)).fetchall()
+        products = conn.execute("SELECT * FROM products WHERE id = ? AND user_id = ?", (product_filter, user_id)).fetchall()
     else:
-        products = conn.execute("SELECT * FROM products").fetchall()
+        products = conn.execute("SELECT * FROM products WHERE user_id = ?", (user_id,)).fetchall()
 
     query = """
         SELECT s.quantity_sold, p.price, p.category, s.date, p.product_name, s.id
         FROM sales s JOIN products p ON s.product_id = p.id
-        WHERE 1=1
+        WHERE p.user_id = ?
     """
-    params = []
+    params = [user_id]
 
     if custom_start and custom_end:
         query += " AND s.date >= ? AND s.date <= ?"

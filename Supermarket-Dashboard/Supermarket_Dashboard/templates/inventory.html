@@ -9,6 +9,8 @@
         if(params.get('msg') === 'product_added') $dispatch('notify', {type: 'success', message: 'Product added successfully!'});
         if(params.get('msg') === 'restocked') $dispatch('notify', {type: 'success', message: 'Inventory restocked!'});
         if(params.get('msg') === 'csv_imported') $dispatch('notify', {type: 'success', message: 'CSV data imported!'});
+        if(params.get('msg') === 'invalid_product') $dispatch('notify', {type: 'error', message: 'Invalid product! Stock or price cannot be 0.'});
+        if(params.get('msg') === 'product_exists') $dispatch('notify', {type: 'error', message: 'Product already exists in module. Restock it.'});
      "
      class="space-y-6">
 
@@ -94,7 +96,7 @@
                 <div class="grid-cols-2">
                     <div class="form-group">
                         <label class="form-label">Price (₹)</label>
-                        <input type="number" name="price" class="form-input" required min="0">
+                        <input type="number" name="price" class="form-input" required min="0" step="any">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Initial Stock</label>

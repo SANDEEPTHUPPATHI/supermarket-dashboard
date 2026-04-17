@@ -167,6 +167,9 @@
 {% block scripts %}
 <script>
 function dashboardData() {
+    let _chartDaily = null;
+    let _chartCategory = null;
+
     return {
         filters: {
             timeframe: '{{ current_timeframe }}',
@@ -182,8 +185,6 @@ function dashboardData() {
             low_stock: {{ low_stock_count }}
         },
         recentSales: [],
-        chartDaily: null,
-        chartCategory: null,
         
         initData() {
             // Initial Chart Render
@@ -212,7 +213,7 @@ function dashboardData() {
                 return null;
             });
 
-            this.chartDaily = new Chart(dailyCtx, {
+            _chartDaily = new Chart(dailyCtx, {
                 type: 'line',
                 data: {
                     labels: allDates,
@@ -250,7 +251,7 @@ function dashboardData() {
                 }
             });
 
-            this.chartCategory = new Chart(catCtx, {
+            _chartCategory = new Chart(catCtx, {
                 type: 'bar',
                 data: {
                     labels: Object.keys({{ category_sales | tojson | safe }}),
@@ -277,7 +278,7 @@ function dashboardData() {
                 const gridColor = getGridColor();
                 Chart.defaults.color = textColor;
                 
-                [this.chartDaily, this.chartCategory].forEach(chart => {
+                [_chartDaily, _chartCategory].forEach(chart => {
                     if (chart.options.scales.x) {
                         chart.options.scales.x.ticks.color = textColor;
                         chart.options.scales.x.grid.color = gridColor;
@@ -319,16 +320,16 @@ function dashboardData() {
                         return null;
                     });
 
-                    this.chartDaily.data.labels = mergedDates;
-                    this.chartDaily.data.datasets[0].data = aVals;
-                    if (this.chartDaily.data.datasets.length > 1) {
-                        this.chartDaily.data.datasets[1].data = pVals;
+                    _chartDaily.data.labels = mergedDates;
+                    _chartDaily.data.datasets[0].data = aVals;
+                    if (_chartDaily.data.datasets.length > 1) {
+                        _chartDaily.data.datasets[1].data = pVals;
                     }
-                    this.chartDaily.update();
+                    _chartDaily.update();
                     
-                    this.chartCategory.data.labels = Object.keys(data.charts.category);
-                    this.chartCategory.data.datasets[0].data = Object.values(data.charts.category);
-                    this.chartCategory.update();
+                    _chartCategory.data.labels = Object.keys(data.charts.category);
+                    _chartCategory.data.datasets[0].data = Object.values(data.charts.category);
+                    _chartCategory.update();
                 });
         },
         
