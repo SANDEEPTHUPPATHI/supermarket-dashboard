@@ -102,8 +102,8 @@ def get_db_connection():
             
         pid = os.getpid()
         if pid not in postgres_pools:
-            # Create a small dedicated pool just for this process
-            postgres_pools[pid] = psycopg2.pool.SimpleConnectionPool(1, 5, db_url)
+            # Create a small dedicated threaded pool just for this process
+            postgres_pools[pid] = psycopg2.pool.ThreadedConnectionPool(1, 5, db_url)
             
         conn = postgres_pools[pid].getconn()
         return PostgresWrapper(conn, postgres_pools[pid], pid)
