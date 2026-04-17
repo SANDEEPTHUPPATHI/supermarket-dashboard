@@ -14,8 +14,11 @@ except ImportError:
 try:
     import psycopg2
     import psycopg2.extras
+    import psycopg2.pool
 except ImportError:
     psycopg2 = None
+
+postgres_pool = None
 
 def parse_date(date_str):
     for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d', '%d.%m.%Y'):
@@ -62,26 +65,35 @@ app.secret_key = "secret123"
 
 # ---------- DATABASE ----------
 class PostgresWrapper:
-    def __init__(self, conn):
+    def __init__(self, conn, pool=None):
         self.conn = conn
+        self.pool = pool
         
     def execute(self, query, params=()):
-        cur = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        # Convert SQLite placeholders to Postgres placeholders
-        query = query.replace("?", "%s")
-        # Replace string literal day of week extract
-        query = query.replace("strftime('%w', s.date)", "CAST(EXTRACT(DOW FROM CAST(s.date AS DATE)) AS TEXT)")
-        
-        cur.execute(query, params)
-        return cur
+        try:
+            cur = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            # Convert SQLite placeholders to Postgres placeholders
+            query = query.replace("?", "%s")
+            # Replace string literal day of week extract
+            query = query.replace("strftime('%w', s.date)", "CAST(EXTRACT(DOW FROM CAST(s.date AS DATE)) AS TEXT)")
+            
+            cur.execute(query, params)
+            return cur
+        except Exception as e:
+            self.conn.rollback() # Prevent poisoned transactions
+            raise e
         
     def commit(self):
         self.conn.commit()
         
     def close(self):
-        self.conn.close()
+        if self.pool:
+            self.pool.putconn(self.conn)
+        else:
+            self.conn.close()
 
 def get_db_connection():
+    global postgres_pool
     db_url = os.getenv("DATABASE_URL")
     
     if db_url and db_url.startswith("postgres"):
@@ -89,8 +101,12 @@ def get_db_connection():
             db_url = db_url.replace("postgres://", "postgresql://", 1)
         if psycopg2 is None:
             raise RuntimeError("psycopg2 is not installed!")
-        conn = psycopg2.connect(db_url)
-        return PostgresWrapper(conn)
+            
+        if postgres_pool is None:
+            postgres_pool = psycopg2.pool.ThreadedConnectionPool(1, 20, db_url)
+            
+        conn = postgres_pool.getconn()
+        return PostgresWrapper(conn, postgres_pool)
 
     db_path = db_url if db_url else "supermarket.db"
     if db_path.startswith("sqlite:///"):
@@ -495,8 +511,9 @@ def import_csv():
                 try:
                     date, product, category, price, qty, stock = row[0:6]
                     date = parse_date(date)
-                    qty = int(qty)
-                    stock = int(stock)
+                    price = int(float(price))
+                    qty = int(float(qty))
+                    stock = int(float(stock))
                     
                     # Resolve product
                     p = conn.execute("SELECT id FROM products WHERE product_name = ? AND user_id = ?", (product, user_id)).fetchone()
