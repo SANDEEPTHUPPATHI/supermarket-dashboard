@@ -14,11 +14,8 @@ except ImportError:
 try:
     import psycopg2
     import psycopg2.extras
-    import psycopg2.pool
 except ImportError:
     psycopg2 = None
-
-postgres_pool = None
 
 def parse_date(date_str):
     for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y/%m/%d', '%d.%m.%Y'):
@@ -65,9 +62,8 @@ app.secret_key = "secret123"
 
 # ---------- DATABASE ----------
 class PostgresWrapper:
-    def __init__(self, conn, pool=None):
+    def __init__(self, conn):
         self.conn = conn
-        self.pool = pool
         
     def execute(self, query, params=()):
         try:
@@ -87,13 +83,9 @@ class PostgresWrapper:
         self.conn.commit()
         
     def close(self):
-        if self.pool:
-            self.pool.putconn(self.conn)
-        else:
-            self.conn.close()
+        self.conn.close()
 
 def get_db_connection():
-    global postgres_pool
     db_url = os.getenv("DATABASE_URL")
     
     if db_url and db_url.startswith("postgres"):
@@ -102,11 +94,8 @@ def get_db_connection():
         if psycopg2 is None:
             raise RuntimeError("psycopg2 is not installed!")
             
-        if postgres_pool is None:
-            postgres_pool = psycopg2.pool.ThreadedConnectionPool(1, 20, db_url)
-            
-        conn = postgres_pool.getconn()
-        return PostgresWrapper(conn, postgres_pool)
+        conn = psycopg2.connect(db_url)
+        return PostgresWrapper(conn)
 
     db_path = db_url if db_url else "supermarket.db"
     if db_path.startswith("sqlite:///"):
